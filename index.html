@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Шахматный тренажер</title>
+
+    <link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1 id="main-title">Шахматы</h1>
+
+    <div class="game-container">
+        <div id="myBoard" style="width: 500px"></div>
+        <div class="info">
+            <h3>Статус игры:</h3>
+            <p id="status"></p>
+            <h3>Запись ходов (PGN):</h3>
+            <div id="pgn"></div>
+        </div>
+    </div>
+
+    <div class="buttons">
+        <!-- Кнопки для режима игры -->
+        <div class="play-buttons">
+            <button id="startBtn">Новая игра</button>
+            <button id="backBtn">Отменить ход</button>
+            <button id="flipBtn">Повернуть доску</button>
+            <button id="setupModeBtn">Режим расстановки</button>
+        </div>
+        <!-- Кнопки для режима расстановки (скрыты по умолчанию) -->
+        <div class="setup-buttons hidden">
+            <button id="clearBoardBtn">Очистить доску</button>
+            <button id="startPositionBtn">Начальная позиция</button>
+            <button id="returnToGameBtn">✅ Вернуться к игре</button>
+        </div>
+    </div>
+
+    <!-- JS библиотеки -->
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script> 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.2/chess.min.js"></script>
+    <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+
+    <!-- Основной скрипт -->
+    <script src="script.js"></script>
+</body>
+</html>
