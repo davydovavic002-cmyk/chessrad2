@@ -10,7 +10,7 @@ $(document).ready(function() {
     // --- WebSocket-соединение ---
     console.log("Попытка подключения к WebSocket серверу...");
     statusEl.html('Подключение к серверу...');
-    const socket = new WebSocket('https://chessrad.onrender.com');
+    const socket = new WebSocket('wss://chessrad2.onrender.com');
 
     socket.onopen = function() {
         console.log('Соединение с WebSocket установлено!');
@@ -126,3 +126,4 @@ $(document).ready(function() {
         if (board) board.flip();
     });
 });
+
