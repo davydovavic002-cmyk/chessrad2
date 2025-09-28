@@ -124,18 +124,16 @@ const config = {
     onSnapEnd: onSnapEnd
 };
 
-// Теперь создаем саму доску. Переменная 'board' наконец-то получает значение!
+// Теперь создаем саму доску.
 board = Chessboard('myBoard', config);
 
-// ИСПОРАВЛЕНО: Код для кнопок теперь находится ЗДЕСЬ,
-// после того как 'board' была создана.
+// Код для кнопок теперь находится здесь, ПОСЛЕ создания доски
 $('#startBtn').on('click', function () {
     socket.send(JSON.stringify({ type: 'reset_game' }));
 });
 
 $('#flipOrientationBtn').on('click', function() {
-    // Эта кнопка локальная, серверу о ней знать не нужно.
-    // Теперь она будет работать, так как 'board' существует.
+    // Эта кнопка локальная, переворачивает доску только для вас
     board.flip();
 });
 
@@ -147,3 +145,4 @@ $('#clearBtn').on('click', function () {
 $('#game-container').hide();
 $('#waiting-screen').show();
 updateStatus();
+
