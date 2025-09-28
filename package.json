@@ -1,0 +1,15 @@
+{
+  "name": "render-static-server",
+  "version": "1.0.0",
+  "description": "A simple server for static files on Render.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  },
+  "engines": {
+    "node": "18.x"
+  }
+}
