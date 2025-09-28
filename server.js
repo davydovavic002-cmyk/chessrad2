@@ -1,84 +1,88 @@
-// Импортируем необходимые модули
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
 const path = require('path');
 
-// Создаем приложение Express
 const app = express();
+app.use(express.static(path.join(__dirname, '.')));
 
-// Определяем порт. Render предоставит свой порт через process.env.PORT
-const PORT = process.env.PORT || 3000;
-
-// Это важная строка! Она говорит серверу отдавать файлы из текущей папки.
-// Так браузер сможет загрузить ваш index.html, script.js, style.css и библиотеки.
-app.use(express.static(path.join(__dirname)));
-
-// Создаем HTTP сервер на основе Express приложения
 const server = http.createServer(app);
-
-// Создаем WebSocket сервер, привязанный к нашему HTTP серверу
 const wss = new WebSocket.Server({ server });
 
-// Используем Set для хранения уникальных подключений (клиентов)
-const clients = new Set();
+let players = {}; // Объект для хранения игроков и их цветов
 
-// Эта функция будет выполняться каждый раз, когда новый пользователь подключается
-wss.on('connection', (ws) => {
-    console.log('Новый клиент подключился');
-    clients.add(ws);
+wss.on('connection', function connection(ws) {
+    let clientId = null;
+    let color = null;
 
-    // --- НАЧАЛО НОВОЙ ЛОГИКИ ---
-    // Определяем, какой по счету этот игрок, и назначаем ему цвет
-
-    let color;
-    if (clients.size === 1) {
-        // Первый подключившийся игрок всегда будет белым
+    // Назначаем цвет новому игроку
+    if (!players['w']) {
         color = 'w';
-    } else if (clients.size === 2) {
-        // Второй игрок будет черным
+        players['w'] = ws;
+        clientId = 'w';
+    } else if (!players['b']) {
         color = 'b';
+        players['b'] = ws;
+        clientId = 'b';
     } else {
-        // Все остальные будут зрителями (пока без особой логики)
-        color = 'spectator';
+        color = 'spectator'; // Если уже есть 2 игрока
     }
 
-    // Создаем специальное сообщение для отправки новому клиенту
-    const colorMessage = {
-        type: 'player_color',
-        color: color
-    };
+    console.log(`Новый клиент подключен. Назначен цвет: ${color}`);
+    ws.send(JSON.stringify({ type: 'player_color', color: color }));
 
-    // Отправляем сообщение ТОЛЬКО что подключившемуся клиенту
-    ws.send(JSON.stringify(colorMessage));
-    console.log(`Клиенту назначен цвет: ${color}`);
-    // --- КОНЕЦ НОВОЙ ЛОГИКИ ---
+    // ИЗМЕНЕНО: Улучшенная обработка сообщений
+    ws.on('message', function incoming(message) {
+        try {
+            const data = JSON.parse(message);
 
-    // Обработка сообщений от клиента (когда он делает ход)
-    ws.on('message', (message) => {
-        console.log(`Получено сообщение от клиента: ${message}`);
-
-        // Рассылаем это сообщение всем ОСТАЛЬНЫМ клиентам
-        for (let client of clients) {
-            if (client !== ws && client.readyState === WebSocket.OPEN) {
-                client.send(message.toString());
+            // Определяем тип сообщения от клиента
+            // 1. Это запрос на сброс игры
+            if (data.type === 'reset_game') {
+                console.log('Получен запрос на сброс игры. Рассылка всем.');
+                // Рассылаем команду на сброс всем клиентам
+                wss.clients.forEach(client => {
+                    if (client.readyState === WebSocket.OPEN) {
+                        client.send(JSON.stringify({ type: 'game_reset' }));
+                    }
+                });
+            } 
+            // 2. Это запрос на очистку доски
+            else if (data.type === 'clear_board') {
+                console.log('Получен запрос на очистку доски. Рассылка всем.');
+                 // Рассылаем команду на очистку всем клиентам
+                 wss.clients.forEach(client => {
+                    if (client.readyState === WebSocket.OPEN) {
+                        client.send(JSON.stringify({ type: 'board_clear' }));
+                    }
+                });
             }
+            // 3. Если у сообщения нет типа, значит это ход
+            else if (data.from && data.to) {
+                console.log('Получен ход: %s', message);
+                // Пересылаем ход другому игроку
+                wss.clients.forEach(function each(client) {
+                    if (client !== ws && client.readyState === WebSocket.OPEN) {
+                        client.send(message.toString());
+                    }
+                });
+            }
+
+        } catch (e) {
+            console.error('Ошибка при обработке сообщения от клиента:', e);
         }
     });
 
-    // Обработка закрытия соединения
     ws.on('close', () => {
-        console.log('Клиент отключился');
-        clients.delete(ws);
-    });
-
-    // Обработка ошибок
-    ws.on('error', (error) => {
-        console.error('Ошибка WebSocket:', error);
+        console.log(`Клиент ${clientId} (${color}) отключился.`);
+        // Удаляем игрока из списка при отключении
+        if (clientId) {
+            delete players[clientId];
+        }
     });
 });
 
-// Запускаем сервер на прослушивание порта
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`Сервер успешно запущен на порту ${PORT}`);
 });
