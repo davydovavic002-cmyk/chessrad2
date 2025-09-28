@@ -1,11 +1,13 @@
 // --- Инициализация ---
+// Находим HTML-элементы в начале для удобства
 const statusEl = $('#status');
 const fenEl = $('#fen');
 const pgnEl = $('#pgn');
 
-let board = null;
-const game = new Chess();
-let playerColor = null;
+// Переменные для хранения состояния игры
+let board = null;            // Пока что доска не создана
+const game = new Chess();    // Логика игры
+let playerColor = null;      // Цвет игрока ('w' или 'b')
 
 // --- Настройка WebSocket ---
 const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -23,16 +25,12 @@ socket.onmessage = function (event) {
     const data = JSON.parse(event.data);
     console.log('Получено сообщение от сервера:', data);
 
-    // Используем switch для удобной обработки разных типов сообщений
     switch (data.type) {
-        // 1. Сервер назначил нам цвет
         case 'player_color':
             playerColor = data.color;
             if (playerColor === 'spectator') {
-                console.log('Вы зритель.');
                 statusEl.html('Режим зрителя. Игра уже идет.');
             } else {
-                console.log(`Вы играете за ${playerColor === 'w' ? 'белых' : 'черных'}.`);
                 board.orientation(playerColor === 'w' ? 'white' : 'black');
                 $('#waiting-screen').hide();
                 $('#game-container').show();
@@ -40,30 +38,26 @@ socket.onmessage = function (event) {
             updateStatus();
             break;
 
-        // 2. Сервер прислал ход другого игрока (у этого сообщения нет 'type')
-        case undefined: 
+        case 'game_reset':
+            game.reset();
+            board.start();
+            statusEl.html('Новая игра! Ход белых.');
+            updateStatus();
+            break;
+
+        case 'board_clear':
+            game.clear();
+            board.clear();
+            updateStatus();
+            break;
+
+        // Если тип не указан, считаем, что это ход
+        default: 
             if (data.from && data.to) {
                 game.move(data);
                 board.position(game.fen());
                 updateStatus();
             }
-            break;
-
-        // НОВОЕ: 3. Сервер прислал команду на сброс игры
-        case 'game_reset':
-            game.reset();
-            board.start();
-            updateStatus();
-            console.log('Игра сброшена по команде сервера.');
-            statusEl.html('Новая игра! Ход белых.');
-            break;
-
-        // НОВОЕ: 4. Сервер прислал команду на очистку доски
-        case 'board_clear':
-            game.clear();
-            board.clear();
-            updateStatus();
-            console.log('Доска очищена по команде сервера.');
             break;
     }
 };
@@ -78,7 +72,7 @@ socket.onclose = function () {
     statusEl.html('Соединение потеряно. Обновите страницу.');
 };
 
-// --- Логика шахматной доски (Chessboard.js) ---
+// --- Функции для управления доской (Chessboard.js) ---
 
 function onDragStart(source, piece) {
     if (game.game_over() || playerColor === null || playerColor === 'spectator' || game.turn() !== playerColor || piece.search(new RegExp(`^${playerColor}`)) === -1) {
@@ -93,8 +87,6 @@ function onDrop(source, target) {
         promotion: 'q'
     });
     if (move === null) return 'snapback';
-
-    // Отправляем ход на сервер
     socket.send(JSON.stringify(move));
     updateStatus();
 }
@@ -102,8 +94,6 @@ function onDrop(source, target) {
 function onSnapEnd() {
     board.position(game.fen());
 }
-
-// --- Вспомогательная функция ---
 
 function updateStatus() {
     let status = '';
@@ -123,8 +113,9 @@ function updateStatus() {
     pgnEl.html(game.pgn());
 }
 
-// --- Конфигурация и создание доски ---
+// --- Конфигурация, создание доски и запуск ---
 
+// Сначала создаем конфигурацию для доски
 const config = {
     draggable: true,
     position: 'start',
@@ -132,27 +123,27 @@ const config = {
     onDrop: onDrop,
     onSnapEnd: onSnapEnd
 };
+
+// Теперь создаем саму доску. Переменная 'board' наконец-то получает значение!
 board = Chessboard('myBoard', config);
 
-// --- ИЗМЕНЕНО: ОБРАБОТЧИКИ НАЖАТИЙ НА КНОПКИ ---
-
-// Нажатие на кнопку "Start Position" теперь отправляет команду на сервер
+// ИСПОРАВЛЕНО: Код для кнопок теперь находится ЗДЕСЬ,
+// после того как 'board' была создана.
 $('#startBtn').on('click', function () {
-    console.log('Отправка запроса на сброс игры...');
     socket.send(JSON.stringify({ type: 'reset_game' }));
 });
 
-// Кнопка "Flip" остается локальной, т.к. это личное предпочтение
-$('#flipOrientationBtn').on('click', board.flip);
+$('#flipOrientationBtn').on('click', function() {
+    // Эта кнопка локальная, серверу о ней знать не нужно.
+    // Теперь она будет работать, так как 'board' существует.
+    board.flip();
+});
 
-// Нажатие на кнопку "Clear Board" теперь отправляет команду на сервер
 $('#clearBtn').on('click', function () {
-    console.log('Отправка запроса на очистку доски...');
     socket.send(JSON.stringify({ type: 'clear_board' }));
 });
 
-// Изначально показываем экран ожидания
+// Первоначальная настройка интерфейса
 $('#game-container').hide();
 $('#waiting-screen').show();
-
 updateStatus();
