@@ -1,148 +1,184 @@
-// --- Инициализация ---
-// Находим HTML-элементы в начале для удобства
-const statusEl = $('#status');
-const fenEl = $('#fen');
-const pgnEl = $('#pgn');
 
-// Переменные для хранения состояния игры
-let board = null;            // Пока что доска не создана
-const game = new Chess();    // Логика игры
-let playerColor = null;      // Цвет игрока ('w' или 'b')
+// Используем $(function() { ... }); чтобы код выполнялся только после полной загрузки страницы
+$(function() {
+    // --- ИНИЦИАЛИЗАЦИЯ ---
 
-// --- Настройка WebSocket ---
-const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-const socket = new WebSocket(`${wsProtocol}//${window.location.host}`);
-console.log('Попытка подключения к WebSocket серверу...');
+    // Находим HTML-элементы один раз и сохраняем в переменные для производительности
+    const statusEl = $('#status');
+    const pgnEl = $('#pgn');
+    const mainTitle = $('#maintitle');
 
-// --- Обработчики событий WebSocket ---
+    // Переменные для хранения состояния игры
+    let board = null;               // Объект доски Chessboard.js
+    const game = new Chess();       // Объект логики игры chess.js
+    let playerColor = null;         // Цвет игрока ('w' или 'b')
 
-socket.onopen = function () {
-    console.log('Соединение с WebSocket установлено.');
-    statusEl.html('Ожидание назначения цвета от сервера...');
-};
+    // --- НАСТРОЙКА WEBSOCKET ---
 
-socket.onmessage = function (event) {
-    const data = JSON.parse(event.data);
-    console.log('Получено сообщение от сервера:', data);
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+    const socket = new WebSocket(wsProtocol + window.location.hostname + ':3000');
 
-    switch (data.type) {
-        case 'player_color':
-            playerColor = data.color;
-            if (playerColor === 'spectator') {
-                statusEl.html('Режим зрителя. Игра уже идет.');
-            } else {
-                board.orientation(playerColor === 'w' ? 'white' : 'black');
-                $('#waiting-screen').hide();
-                $('#game-container').show();
-            }
+    console.log('Попытка подключения к WebSocket серверу...');
+
+    // --- ОБРАБОТЧИКИ СОБЫТИЙ WEBSOCKET ---
+
+    socket.onopen = function() {
+        console.log('Соединение с WebSocket установлено.');
+        statusEl.html('Ожидание назначения цвета от сервера...');
+    };
+
+    socket.onmessage = function(event) {
+        // Сервер может прислать как JSON-объект, так и просто FEN-строку
+        // FEN-строка приходит при первом подключении, чтобы показать текущую позицию
+        let data;
+        try {
+            data = JSON.parse(event.data);
+        } catch (e) {
+            // Если парсинг не удался, значит, это FEN-строка
+            game.load(event.data);
+            board.position(game.fen());
             updateStatus();
-            break;
+            return;
+        }
 
-        case 'game_reset':
-            game.reset();
-            board.start();
-            statusEl.html('Новая игра! Ход белых.');
-            updateStatus();
-            break;
+        console.log('Получено сообщение от сервера:', data);
 
-        case 'board_clear':
-            game.clear();
-            board.clear();
-            updateStatus();
-            break;
-
-        // Если тип не указан, считаем, что это ход
-        default: 
-            if (data.from && data.to) {
-                game.move(data);
-                board.position(game.fen());
+        // Обрабатываем сообщения в зависимости от их типа
+        switch (data.type) {
+            case 'playercolor':
+                playerColor = data.color;
+                mainTitle.html(`Вы играете за ${playerColor === 'w' ? 'Белых' : 'Черных'}`);
+                if (playerColor === 'spectator') {
+                    mainTitle.html('Режим зрителя');
+                } else {
+                    board.orientation(playerColor === 'w' ? 'white' : 'black');
+                }
                 updateStatus();
-            }
-            break;
-    }
-};
+                break;
 
-socket.onerror = function (error) {
-    console.error('Ошибка WebSocket:', error);
-    statusEl.html('Ошибка соединения с сервером.');
-};
+            case 'gamereset':
+                game.reset();
+                board.start();
+                updateStatus();
+                break;
 
-socket.onclose = function () {
-    console.log('Соединение с WebSocket закрыто.');
-    statusEl.html('Соединение потеряно. Обновите страницу.');
-};
+            case 'boardclear':
+                game.clear();
+                board.clear();
+                updateStatus();
+                break;
 
-// --- Функции для управления доской (Chessboard.js) ---
+            // ----- КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ! ЭТОГО БЛОКА НЕ БЫЛО -----
+            case 'move_undone':
+                game.undo(); // Отменяем ход в нашем локальном объекте игры
+                board.position(game.fen()); // Обновляем позицию на доске
+                updateStatus(); // Обновляем статус
+                break;
+            // ---------------------------------------------------
 
-function onDragStart(source, piece) {
-    if (game.game_over() || playerColor === null || playerColor === 'spectator' || game.turn() !== playerColor || piece.search(new RegExp(`^${playerColor}`)) === -1) {
-        return false;
-    }
-}
+            // Если тип не указан, считаем, что это объект хода
+            default:
+                if (data.from && data.to) {
+                    game.move(data); // Применяем ход, полученный от сервера
+                    board.position(game.fen());
+                    updateStatus();
+                }
+                break;
+        }
+    };
 
-function onDrop(source, target) {
-    const move = game.move({
-        from: source,
-        to: target,
-        promotion: 'q'
-    });
-    if (move === null) return 'snapback';
-    socket.send(JSON.stringify(move));
-    updateStatus();
-}
+    socket.onerror = function(error) {
+        console.error('Ошибка WebSocket:', error);
+        statusEl.html('Ошибка соединения с сервером.');
+    };
 
-function onSnapEnd() {
-    board.position(game.fen());
-}
+    socket.onclose = function() {
+        console.log('Соединение с WebSocket закрыто.');
+        statusEl.html('Соединение потеряно. Обновите страницу.');
+    };
 
-function updateStatus() {
-    let status = '';
-    const moveColor = game.turn() === 'w' ? 'Белых' : 'Черных';
-    if (game.in_checkmate()) {
-        status = `Игра окончена, ${moveColor} получили мат.`;
-    } else if (game.in_draw()) {
-        status = 'Игра окончена, ничья.';
-    } else {
-        status = `Ход ${moveColor}.`;
-        if (game.in_check()) {
-            status += ` ${moveColor} под шахом.`;
+    // --- ФУНКЦИИ ДЛЯ УПРАВЛЕНИЯ ДОСКОЙ ---
+
+    // Вызывается перед тем, как игрок начнет перетаскивать фигуру
+    function onDragStart(source, piece) {
+        // Запретить ход, если:
+        // 1. Игра окончена
+        // 2. Это не очередь этого игрока
+        if (game.game_over() || 
+            (game.turn() === 'w' && playerColor !== 'w') ||
+            (game.turn() === 'b' && playerColor !== 'b')) {
+            return false;
         }
     }
-    statusEl.html(status);
-    fenEl.html(game.fen());
-    pgnEl.html(game.pgn());
-}
 
-// --- Конфигурация, создание доски и запуск ---
+    // Вызывается, когда игрок бросает фигуру на клетку
+    function onDrop(source, target) {
+        // Пытаемся сделать ход в локальном объекте игры
+        const move = game.move({
+            from: source,
+            to: target,
+            promotion: 'q' // Всегда превращаем в ферзя для простоты
+        });
 
-// Сначала создаем конфигурацию для доски
-const config = {
-    draggable: true,
-    position: 'start',
-    onDragStart: onDragStart,
-    onDrop: onDrop,
-    onSnapEnd: onSnapEnd
-};
+        // Если ход нелегальный, отменяем его визуально
+        if (move === null) return 'snapback';
 
-// Теперь создаем саму доску.
-board = Chessboard('myBoard', config);
+        // Если ход легальный, отправляем его на сервер
+        socket.send(JSON.stringify(move));
+    }
 
-// Код для кнопок теперь находится здесь, ПОСЛЕ создания доски
-$('#startBtn').on('click', function () {
-    socket.send(JSON.stringify({ type: 'reset_game' }));
+    // Вызывается после анимации хода для синхронизации
+    function onSnapEnd() {
+        board.position(game.fen());
+    }
+
+    // Обновляет всю текстовую информацию на странице
+    function updateStatus() {
+        let status = '';
+        const moveColor = game.turn() === 'w' ? 'Белых' : 'Черных';
+
+        if (game.in_checkmate()) {
+            status = `Игра окончена, ${moveColor} получили мат.`;
+        } else if (game.in_draw()) {
+            status = 'Игра окончена, ничья.';
+        } else {
+            status = `Ход ${moveColor}`;
+            if (game.in_check()) {
+                status += `, ${moveColor} под шахом.`;
+            }
+        }
+
+        statusEl.html(status);
+        pgnEl.html(game.pgn());
+    }
+
+    // --- КОНФИГУРАЦИЯ И ЗАПУСК ---
+
+    const config = {
+        draggable: true,
+        position: 'start',
+        onDragStart: onDragStart,
+        onDrop: onDrop,
+        onSnapEnd: onSnapEnd
+    };
+    board = Chessboard('myBoard', config); // Инициализируем доску
+    updateStatus();
+
+    // --- ОБРАБОТЧИКИ НАЖАТИЯ КНОПОК ---
+
+    $('#startBtn').on('click', function() {
+        socket.send(JSON.stringify({ type: 'reset_game' }));
+    });
+
+    $('#undoBtn').on('click', function() {
+        console.log("Отправляем запрос на отмену хода на сервер...");
+        socket.send(JSON.stringify({ type: 'undo_move' }));
+    });
+
+    $('#flipOrientationBtn').on('click', board.flip);
+
+    // Обработчик для кнопки "Очистить доску" с правильным ID
+    $('#clearBoardBtn').on('click', function() {
+        socket.send(JSON.stringify({ type: 'clear_board' }));
+    });
 });
-
-$('#flipOrientationBtn').on('click', function() {
-    // Эта кнопка локальная, переворачивает доску только для вас
-    board.flip();
-});
-
-$('#clearBtn').on('click', function () {
-    socket.send(JSON.stringify({ type: 'clear_board' }));
-});
-
-// Первоначальная настройка интерфейса
-$('#game-container').hide();
-$('#waiting-screen').show();
-updateStatus();
-
