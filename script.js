@@ -7,7 +7,9 @@ let playerColor = null; // Наш цвет ('w' или 'b')
 
 // ================== Логика WebSocket ==================
 function connectWebSocket() {
-    const serverIp = '147.45.147.30'; 
+    // ВАЖНО: Убедитесь, что IP-адрес и порт верные.
+    // Если вы запускаете на своем компьютере, можно использовать 'localhost'
+    const serverIp = window.location.hostname || '147.45.147.30'; 
     ws = new WebSocket(`ws://${serverIp}:3000`);
 
     ws.onopen = function() {
@@ -19,17 +21,20 @@ function connectWebSocket() {
         console.log("Получено сообщение от сервера:", event.data);
         const data = JSON.parse(event.data);
 
-        if (data.type === 'player_color') {
-            playerColor = data.color;
-            if (playerColor === 'b') {
-                board.orientation('black');
-            }
-            // Статус обновится после получения состояния доски
-        } 
-        else if (data.type === 'board_state') {
-            game.load(data.fen);
-            board.position(data.fen);
-            updateGameStatus(); // Обновляем статус после каждого хода
+        switch (data.type) {
+            case 'player_color':
+                playerColor = data.color;
+                if (playerColor === 'b') {
+                    board.orientation('black');
+                }
+                updateGameStatus();
+                break;
+
+            case 'board_state':
+                game.load(data.fen);
+                board.position(data.fen);
+                updateGameStatus();
+                break;
         }
     };
 
@@ -53,16 +58,25 @@ function updateStatus(text) {
 }
 
 function updateGameStatus() {
-    if (!playerColor) return; // Не обновляем статус, если цвет еще не назначен
+    if (!playerColor || !game.fen()) {
+        return;
+    }
 
     let statusText = 'Вы играете за ' + (playerColor === 'w' ? 'Белых' : 'Черных');
     const turn = game.turn() === 'w' ? 'Белых' : 'Черных';
-    statusText += '. Сейчас ход: ' + turn;
 
-    if (game.in_checkmate()) {
-        statusText += '. Шах и мат!';
-    } else if (game.in_check()) {
-        statusText += '. Шах!';
+    if (game.game_over()) {
+        statusText = 'Игра окончена.';
+        if (game.in_checkmate()) {
+            statusText += ` Мат! ${turn === 'Белых' ? 'Черные' : 'Белые'} победили.`;
+        } else if (game.in_draw()) {
+            statusText += ' Ничья.';
+        }
+    } else {
+        statusText += '. Сейчас ход: ' + turn;
+        if (game.in_check()) {
+            statusText += '. Шах!';
+        }
     }
 
     updateStatus(statusText);
@@ -71,44 +85,30 @@ function updateGameStatus() {
 // ================== Логика шахматной доски (Chessboard.js) ==================
 
 function onDragStart(source, piece) {
-    if (playerColor === null || game.game_over()) {
+    if (playerColor === null || game.game_over() || game.turn() !== playerColor || piece.charAt(0) !== playerColor) {
         return false;
     }
-    if (game.turn() !== playerColor) {
-        return false;
-    }
-    if (piece.search(new RegExp(`^${playerColor}`)) === -1) {
-        return false;
-    }
+    return true; 
 }
 
 function onDrop(source, target) {
-    const move = {
+    const moveData = {
         from: source,
         to: target,
         promotion: 'q'
     };
-
-    if (game.move(move) === null) {
-        return 'snapback';
-    }
+    const moveResult = game.move(moveData);
+    if (moveResult === null) return 'snapback';
     game.undo(); 
 
     if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-            type: 'move',
-            move: move
-        }));
+        ws.send(JSON.stringify({ type: 'move', move: moveData }));
     }
 }
 
 // ================== Инициализация при загрузке страницы ==================
 document.addEventListener('DOMContentLoaded', function() {
-    // Находим элементы
     messageElement = document.getElementById('message');
-    const startBtn = document.getElementById('startBtn');
-    const undoBtn = document.getElementById('undoBtn');
-    const flipBtn = document.getElementById('flipOrientationBtn');
 
     updateStatus("Подключение к серверу...");
 
@@ -121,25 +121,35 @@ document.addEventListener('DOMContentLoaded', function() {
 
     board = Chessboard('myBoard', config);
 
-    // ИСПРАВЛЕНИЕ: Убрали форму и вызываем подключение напрямую
     connectWebSocket();
 
-    // Обработчики кнопок остаются
+    // =============== ВОТ ЭТОТ БЛОК ВСЕ РЕШАЕТ ===============
+    // Ищем кнопки в HTML по их ID
+    const startBtn = document.getElementById('startBtn');
+    const undoBtn = document.getElementById('undoBtn');
+    const flipBtn = document.getElementById('flipOrientationBtn');
+
+    // Назначаем действия на клики
     if (startBtn) {
         startBtn.addEventListener('click', () => {
+            console.log("Нажата кнопка 'Новая игра'"); // Для отладки
             if (ws && ws.readyState === WebSocket.OPEN) {
+                // Отправляем команду на сервер
                 ws.send(JSON.stringify({ type: 'reset_game' }));
             }
         });
     }
     if (undoBtn) {
         undoBtn.addEventListener('click', () => {
+            console.log("Нажата кнопка 'Отменить ход'"); // Для отладки
             if (ws && ws.readyState === WebSocket.OPEN) {
+                // Отправляем команду на сервер
                 ws.send(JSON.stringify({ type: 'undo_move' }));
             }
         });
     }
-    if (flipBtn) {
-        flipBtn.addEventListener('click', board.flip);
+    if (flipOrientationBtn) {
+        flipOrientationBtn.addEventListener('click', board.flip);
     }
+    // ==========================================================
 });
