@@ -6,7 +6,12 @@ const path = require('path');
 const { Chess } = require('chess.js');
 
 const app = express();
-app.use(express.static(path.join(__dirname, 'public')));
+
+// ======================= ВОТ ИСПРАВЛЕНИЕ =======================
+// Убираем 'public', так как ваши файлы лежат в той же папке, что и server.js
+// __dirname — это путь к текущей папке. Сервер будет отдавать файлы прямо из нее.
+app.use(express.static(__dirname));
+// ===============================================================
 
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
@@ -18,7 +23,7 @@ function broadcastGameState() {
     const gameState = {
         type: 'board_state',
         fen: game.fen(),
-        turn: game.turn() // Будем также отправлять, чей сейчас ход
+        turn: game.turn()
     };
     const message = JSON.stringify(gameState);
 
@@ -46,6 +51,7 @@ wss.on('connection', function connection(ws) {
         ws.playerColor = 'spectator';
     }
 
+    // (Я исправил ваши строки console.log, чтобы они использовали обратные кавычки ``)
     console.log(`Новый клиент подключен. Назначен цвет: ${playerColor}`);
 
     ws.send(JSON.stringify({
@@ -53,6 +59,7 @@ wss.on('connection', function connection(ws) {
         color: playerColor
     }));
 
+    // Отправляем начальное состояние доски сразу после подключения
     ws.send(JSON.stringify({
         type: 'board_state',
         fen: game.fen(),
@@ -66,10 +73,9 @@ wss.on('connection', function connection(ws) {
 
             switch (data.type) {
                 case 'move':
-                    // ИСПРАВЛЕНИЕ: Проверка перенесена сюда!
                     if (players[game.turn()] !== ws) {
                         console.log(`Попытка хода не в свою очередь от ${ws.playerColor}`);
-                        return; // Игнорируем только ход, а не все сообщения
+                        return;
                     }
                     const move = game.move(data.move);
                     if (move) {
