@@ -1,125 +1,117 @@
-// ==========================================================
-// 1. ИНИЦИАЛИЗАЦИЯ
-// ==========================================================
 const express = require('express');
 const http = require('http');
-const { Server } = require("socket.io");
+const socketIo = require('socket.io');
 const { Chess } = require('chess.js');
 
 const app = express();
+const server = http.createServer(app);
+const io = socketIo(server);
+
+const PORT = 3000;
+
 app.use(express.static('public'));
 
-const server = http.createServer(app);
-const io = new Server(server);
+let game = new Chess();
+let players = {
+    white: null,
+    black: null
+};
 
-// Глобальные переменные для состояния игры
-let players = {};
-let playerSockets = [];
-let currentGame = null;
-
-// ==========================================================
-// 2. ЛОГИКА ОБРАБОТКИ СОЕДИНЕНИЙ
-// ==========================================================
 io.on('connection', (socket) => {
-    try {
-        console.log(`[СОЕДИНЕНИЕ] Клиент ${socket.id} подключился`);
+    console.log(`Новое подключение: ${socket.id}`);
 
-        // Назначение игрока или наблюдателя
-        if (playerSockets.length < 2) {
-            const color = (playerSockets.length === 0) ? 'white' : 'black';
-            players[socket.id] = { color: color };
-            playerSockets.push(socket);
+    // --- Назначение ролей ---
+    if (players.white === null) {
+        players.white = socket.id;
+        socket.emit('init', { color: 'white' });
+        console.log(`Игрок ${socket.id} назначен белым.`);
+    } else if (players.black === null) {
+        players.black = socket.id;
+        socket.emit('init', { color: 'black' });
+        console.log(`Игрок ${socket.id} назначен черным.`);
+    } else {
+        socket.emit('init', { color: 'spectator' });
+        console.log(`Игрок ${socket.id} назначен наблюдателем.`);
+    }
 
-            console.log(`[ИГРА] Клиент ${socket.id} назначен цветом ${color}`);
+    // Отправляем текущее состояние доски новому подключению
+    socket.emit('boardstate', { fen: game.fen() });
 
-            socket.emit('init', {
-                color: color,
-                gameStarted: playerSockets.length === 2
-            });
+    // Если оба игрока на месте, начинаем игру
+    if (players.white && players.black) {
+        io.emit('gamestart', { fen: game.fen() });
+        console.log("Оба игрока на месте. Игра началась!");
+    }
 
-            if (playerSockets.length === 2) {
-                console.log('[ИГРА] Два игрока подключены. Начинаем игру.');
-                currentGame = new Chess();
-                io.emit('gamestart', { fen: currentGame.fen() });
-            }
-
-        } else {
-            console.log(`[СОЕДИНЕНИЕ] Клиент ${socket.id} подключился как наблюдатель`);
-            socket.emit('init', {
-                color: 'spectator',
-                gameStarted: currentGame !== null
-            });
-
-            if (currentGame) {
-                socket.emit('boardstate', { fen: currentGame.fen() });
-            }
+    // --- Обработка ходов ---
+    socket.on('move', (move) => {
+        const playerColor = players.white === socket.id ? 'w' : (players.black === socket.id ? 'b' : null);
+        if (playerColor !== game.turn()) {
+            return; // Не ход этого игрока
         }
 
-        // Обработка хода
-        socket.on('move', (moveData) => {
-            if (!currentGame) return;
-            const player = players[socket.id];
-            if (!player) return;
-
-            if (player.color[0] === currentGame.turn()) {
-                const moveResult = currentGame.move(moveData);
-
-                if (moveResult) {
-                    console.log(`[ИГРА] Принят ход от ${player.color}: ${moveResult.san}`);
-                    io.emit('move', { fen: currentGame.fen() });
-
-                    if (currentGame.isGameOver()) {
-                        let msg = 'Игра окончена.';
-                        if (currentGame.isCheckmate()) {
-                            const winner = currentGame.turn() === 'w' ? 'черные' : 'белые';
-                            msg = `Мат! Победили ${winner}.`;
-                        } else if (currentGame.isDraw()) {
-                            msg = 'Ничья.';
-                        }
-                        io.emit('gameover', { message: msg });
+        try {
+            const result = game.move(move);
+            if (result) {
+                io.emit('move', { fen: game.fen(), move: result }); // Отправляем и ход для истории
+                if (game.game_over()) {
+                    let message = "Ничья";
+                    if (game.in_checkmate()) {
+                        message = `Мат! Победили ${game.turn() === 'w' ? 'черные' : 'белые'}.`;
                     }
-                } else {
-                    socket.emit('invalidmove', { message: 'Неверный ход' });
+                    io.emit('gameover', { message: message });
                 }
+            } else {
+                socket.emit('invalidmove', { message: 'Недопустимый ход' });
             }
-        });
+        } catch (err) {
+            console.log("Ошибка при обработке хода:", err.message);
+        }
+    });
 
-        // Обработка перезапуска
-        socket.on('restartgame', () => {
-            if (playerSockets.length === 2) {
-                console.log('[ИГРА] Получен запрос на перезапуск. Начинаем заново.');
-                currentGame = new Chess();
-                io.emit('gamestart', { fen: currentGame.fen() });
-            }
-        });
+    // --- Смена цвета (до начала игры) ---
+    socket.on('swapcolors', () => {
+        if (players.white === socket.id && players.black === null) {
+            players.white = null;
+            players.black = socket.id;
+            socket.emit('init', { color: 'black' });
+            console.log(`Игрок ${socket.id} поменял цвет на черный.`);
+        }
+    });
 
-        // Обработка отключения
-        socket.on('disconnect', () => {
-            console.log(`[СОЕДИНЕНИЕ] Клиент ${socket.id} отключился`);
+    // --- Перезапуск игры ---
+    socket.on('restartgame', () => {
+        game = new Chess();
+        // Сбрасываем игру, но оставляем игроков на своих местах
+        io.emit('gamestart', { fen: game.fen() });
+        console.log("Игра перезапущена по запросу одного из игроков.");
+    });
 
-            if (players[socket.id]) {
-                const playerColor = players[socket.id].color;
-                delete players[socket.id];
-                playerSockets = playerSockets.filter(s => s.id !== socket.id);
+    // --- УЛУЧШЕННАЯ ЛОГИКА ОТКЛЮЧЕНИЯ ---
+    socket.on('disconnect', () => {
+        console.log(`Игрок отключился: ${socket.id}`);
+        let disconnectedPlayerColor = null;
 
-                // Если игра была в процессе, сбрасываем ее
-                if (currentGame) {
-                    currentGame = null;
-                    console.log(`[ИГРА] Игрок (${playerColor}) отключился. Игра сброшена.`);
-                    io.emit('opponent_disconnected', { message: 'Соперник отключился. Игра окончена.' });
-                }
-            }
-        });
+        if (players.white === socket.id) {
+            players.white = null;
+            disconnectedPlayerColor = 'Белый';
+            console.log("Слот белых освобожден.");
+        } else if (players.black === socket.id) {
+            players.black = null;
+            disconnectedPlayerColor = 'Черный';
+            console.log("Слот черных освобожден.");
+        }
 
-    } catch (error) {
-        console.error(`!!! КРИТИЧЕСКАЯ ОШИБКА в обработчике сокета ${socket.id}:`, error);
-    }
+        if (disconnectedPlayerColor) {
+            // Если отключился один из игроков, сбрасываем игру и сообщаем оставшемуся
+            game = new Chess();
+            io.emit('opponent_disconnected', { 
+                message: `Соперник (${disconnectedPlayerColor}) отключился. Игра сброшена. Ожидание нового игрока.` 
+            });
+        }
+    });
 });
 
-// ==========================================================
-// 3. ЗАПУСК СЕРВЕРА
-// ==========================================================
-const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
-    console.log(`[СЕРВЕР] Сервер запущен и слушает порт ${PORT}`);
+    console.log(`Сервер запущен на порту ${PORT}`);
 });
