@@ -3,46 +3,52 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Шахматы</title>
+    <title>Онлайн Шахматы</title>
     <link rel="stylesheet" href="css/chessboard-1.0.0.min.css">
-    <link rel="stylesheet" href="css/style.css">
+    <style>
+        body { font-family: sans-serif; display: flex; justify-content: center; align-items: flex-start; margin-top: 20px; }
+        .container { display: flex; gap: 30px; }
+        .board-container { width: 500px; }
+        .info-panel { width: 250px; }
+        .info-panel h3, .info-panel h4 { margin-top: 0; }
+        #pgn { border: 1px solid #ccc; padding: 10px; height: 300px; overflow-y: scroll; font-family: monospace; }
+        .controls button { width: 100%; padding: 10px; margin-bottom: 10px; font-size: 16px; cursor: pointer; }
+        .controls button:disabled { background-color: #e0e0e0; cursor: not-allowed; }
+    </style>
 </head>
 <body>
-    <h1>Шахматы Онлайн</h1>
-    <div class="game-container">
-        <div id="board-container">
-            <div id="myBoard"></div>
-        </div>
-        <div id="info-panel">
-            <h2>Статус игры</h2>
-            <p id="status-container">
-                <span id="status">Ожидание соперника...</span>
-            </p>
-            <h2>История ходов</h2>
-            <div id="move-history-container">
-                <div id="pgn"></div>
-            </div>
-            <div class="controls">
-                <div id="preGameControls">
-                    <button id="swapColorsBtn">Поменять цвет</button>
-                </div>
-                <div id="inGameControls" style="display: none;">
-                    <button id="restartBtn">Начать заново</button>
-                </div>
-                <div id="postGameControls" style="display: none;">
-                    <button id="newGameBtn">Новая игра</button>
-                </div>
-            </div>
-        </div>
+
+<div class="container">
+    <div class="board-container">
+        <div id="board" style="width: 500px"></div>
     </div>
+    <div class="info-panel">
+        <h3>Онлайн Шахматы</h3>
+        <h4 id="status">Выберите сторону, чтобы начать</h4>
+        <h4 id="player-role"></h4>
 
-    <script src="js/jquery-3.4.1.min.js"></script>
-    <script src="js/chessboard-1.0.0.min.js"></script>
+        <div class="controls">
+            <div id="join-controls">
+                <button id="joinWhite">Играть за белых</button>
+                <button id="joinBlack">Играть за черных</button>
+            </div>
+            <div id="game-controls" style="display: none;">
+                <button id="swapButton">Сменить цвет</button>
+                <button id="restartButton">Начать заново</button>
+            </div>
+        </div>
 
-    <!-- Используем локальный файл, который у вас уже есть -->
-    <script src="js/chess.min.js"></script>
+        <h4>История ходов (PGN)</h4>
+        <div id="pgn"></div>
+    </div>
+</div>
 
-    <script src="/socket.io/socket.io.js"></script>
-    <script src="js/script_v2.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+<script src="js/jquery-3.4.1.min.js"></script>
+<script src="js/chessboard-1.0.0.min.js"></script>
+<!-- *** Указываем правильное имя файла chess.min.js *** -->
+<script src="js/chess.min.js"></script>
+<script src="js/script_v2.js"></script>
+
 </body>
 </html>
