@@ -1,146 +1,230 @@
-document.addEventListener('DOMContentLoaded', function() {
-    // --- Получаем элементы со страницы ---
-    const statusEl = document.getElementById('status');
-    const pgnEl = document.getElementById('pgn');
-    const boardEl = document.getElementById('myBoard');
-    const restartBtn = document.getElementById('restartBtn');
-    const swapColorsBtn = document.getElementById('swapColorsBtn'); // НОВОЕ: Нашли кнопку смены цвета
-    const preGameControls = document.getElementById('preGameControls');
-    const inGameControls = document.getElementById('inGameControls');
+// ==============================================================
+// Инициализация переменных и объектов
+// ==============================================================
 
-    // --- Инициализация игры и сокета ---
-    let board = null;
-    const game = new Chess();
-    let myColor = 'white'; // По умолчанию
-    let playerIsSpectator = true;
+// Подключение к серверу WebSocket (Socket.IO)
+const socket = io();
 
-    const socket = io();
+// Объект chess.js для управления игрой
+const game = new Chess();
 
-    // --- Обработчики событий от сервера ---
+// jQuery-объекты для элементов DOM, основанные на вашем новом HTML
+const statusEl = $('#status');
+const restartButton = $('#restartButton');
+const swapButton = $('#swapButton');
+const joinWhiteBtn = $('#joinWhite');
+const joinBlackBtn = $('#joinBlack');
+const playerRoleEl = $('#player-role');
+const pgnEl = $('#pgn'); // Элемент для отображения PGN
 
-    socket.on('connect', () => {
-        console.log('Socket.IO соединение установлено. ID:', socket.id);
-    });
+// Контейнеры для кнопок
+const joinControls = $('#join-controls');
+const gameControls = $('#game-controls');
 
-    socket.on('init', (data) => {
-        myColor = data.color;
-        playerIsSpectator = (myColor === 'spectator');
+// Объект chessboard.js (инициализируется позже)
+let board;
 
-        // НОВОЕ: Логируем в консоль для отладки
-        console.log(`Сервер присвоил вам цвет: ${myColor}`);
+// Вспомогательная переменная для отслеживания состояния окончания игры
+let gameIsOver = false;
 
-        // ИСПРАВЛЕНО: Правильно устанавливаем ориентацию доски
-        board.orientation(myColor === 'black' ? 'black' : 'white');
+// Переменная для хранения цвета игрока ('white' или 'black')
+let playerColor = null;
 
-        if (playerIsSpectator) {
-            statusEl.textContent = 'Вы наблюдатель.';
-        } else {
-            statusEl.textContent = `Вы играете за ${myColor === 'white' ? 'белых' : 'черных'}. Ожидание соперника...`;
-        }
-    });
+// ==============================================================
+// Обработчики событий WebSocket
+// ==============================================================
 
-    socket.on('gamestart', (data) => {
-        console.log("Игра началась! FEN:", data.fen);
-        game.load(data.fen);
-        board.position(data.fen);
-        updateStatus();
+socket.on('gamestart', function(data) {
+    game.load(data.fen);
+    board.position(data.fen);
+    updatePgnData(data.pgn);
+    statusEl.text('Игра началась. Ход белых');
+    gameIsOver = false; // Сбрасываем флаг окончания игры
 
-        // НОВОЕ: Прячем пред-игровые кнопки и показываем игровые
-        preGameControls.style.display = 'none';
-        inGameControls.style.display = 'block';
-    });
+    // Показываем игровые кнопки и скрываем кнопки присоединения
+    joinControls.hide();
+    gameControls.show();
 
-    socket.on('move', (data) => {
-        game.load(data.fen);
-        board.position(data.fen);
-        updateStatus();
-    });
+    // Разблокируем кнопки
+    swapButton.prop('disabled', false);
+    restartButton.prop('disabled', false);
+});
 
-    socket.on('gameover', (data) => {
-        statusEl.innerHTML = `<b>Игра окончена:</b> ${data.message}`;
-        inGameControls.style.display = 'none'; // Прячем кнопку рестарта
-    });
+socket.on('boardstate', function(data) {
+    game.load(data.fen);
+    board.position(data.fen);
+    updatePgnData(data.pgn);
+});
 
-    // --- Функции логики доски (Chessboard.js) ---
+socket.on('move', function(data) {
+    game.load(data.fen);
+    board.position(game.fen());
+    updatePgnData(data.pgn);
 
-    function onDragStart(source, piece) {
-        if (game.game_over() === true ||
-            playerIsSpectator ||
-            game.turn() !== myColor[0]) { // Проверяем, что сейчас ход нашего цвета ('w' или 'b')
-            return false;
-        }
-        // Запрещаем ходить чужими фигурами
-        if (piece.search(new RegExp(`^${myColor[0]}`)) === -1) {
-            return false;
-        }
+    const turn = game.turn() === 'w' ? 'Белых' : 'Черных';
+    statusEl.text('Ход ' + turn);
+
+    // Блокируем кнопку смены цвета после первого хода
+    swapButton.prop('disabled', true);
+});
+
+socket.on('invalidmove', function(data) {
+    board.position(data.fen);
+    game.load(data.fen);
+    statusEl.text('Недопустимый ход! Попробуйте снова.');
+});
+
+socket.on('colorswapped', function(data) {
+    playerColor = data.color;
+    board.orientation(playerColor);
+    playerRoleEl.text('Вы играете за ' + (playerColor === 'white' ? 'белых' : 'черных'));
+});
+
+socket.on('playerJoined', function(data) {
+    playerColor = data.color;
+    board.orientation(playerColor);
+    playerRoleEl.text('Вы играете за ' + (playerColor === 'white' ? 'белых' : 'черных'));
+
+    // Скрываем кнопки присоединения, так как игрок уже в игре
+    joinControls.hide();
+    gameControls.show();
+});
+
+socket.on('gameover', function(data) {
+    statusEl.text(data.message);
+    restartButton.prop('disabled', false);
+    gameIsOver = true;
+});
+
+socket.on('opponent_disconnected', function(data) {
+    statusEl.text(data.message);
+    gameIsOver = true;
+});
+
+// ==============================================================
+// Обработчики событий кнопок
+// ==============================================================
+
+joinWhiteBtn.on('click', function() {
+    socket.emit('joingame', { color: 'white' });
+});
+
+joinBlackBtn.on('click', function() {
+    socket.emit('joingame', { color: 'black' });
+});
+
+swapButton.on('click', function() {
+    socket.emit('swapcolors');
+});
+
+restartButton.on('click', function() {
+    socket.emit('restartgame');
+});
+
+// ==============================================================
+// Обработчики событий доски (chessboard.js)
+// ==============================================================
+
+const onDragStart = function(source, piece) {
+    if (gameIsOver ||
+        game.in_checkmate() ||
+        game.in_stalemate() ||
+        game.in_draw() ||
+        game.in_threefold_repetition() ||
+        game.insufficient_material()) {
+        return false;
     }
 
-    function onDrop(source, target) {
-        let move = game.move({
-            from: source,
-            to: target,
-            promotion: 'q'
-        });
-
-        if (move === null) return 'snapback';
-
-        socket.emit('move', { from: source, to: target, promotion: 'q' });
+    // Разрешаем ход, только если это ход текущего игрока
+    const turn = game.turn();
+    if ((turn === 'w' && piece.search(/^b/) !== -1) ||
+        (turn === 'b' && piece.search(/^w/) !== -1) ||
+        (playerColor === 'white' && turn === 'b') ||
+        (playerColor === 'black' && turn === 'w')) {
+        return false;
     }
 
-    function onSnapEnd() {
-        board.position(game.fen());
-    }
+    return true;
+};
 
-    function updateStatus() {
-        let status = '';
-        const moveColor = game.turn() === 'w' ? 'Белые' : 'Черные';
-
-        if (game.game_over()) {
-             if (game.in_checkmate()) {
-                status = `Игра окончена, мат. Победили ${moveColor === 'Белые' ? 'черные' : 'белые'}.`;
-            } else if (game.in_draw()) {
-                status = 'Игра окончена, ничья.';
-            }
-        } else {
-            status = `Ход ${moveColor}.`;
-            if (!playerIsSpectator && game.turn() === myColor[0]) {
-                status += ' <b>(Ваш ход)</b>';
-            }
-            if (game.in_check()) {
-                 status += `, ${moveColor} под шахом`;
-            }
-        }
-
-        statusEl.innerHTML = status; // Используем innerHTML для жирного шрифта
-        pgnEl.innerHTML = game.pgn({ max_width: 5, newline_char: '<br />' });
-    }
-
-    // --- Обработчики нажатий на кнопки ---
-
-    // НОВОЕ: Добавили логику для кнопки смены цвета
-    swapColorsBtn.addEventListener('click', () => {
-        console.log('Нажата кнопка смены цвета. Отправляем запрос на сервер.');
-        socket.emit('swapcolors');
+const onDrop = function(source, target) {
+    // Делаем ход в локальном объекте игры
+    const move = game.move({
+        from: source,
+        to: target,
+        promotion: 'q' // Автоматически превращаем пешку в ферзя
     });
 
-    restartBtn.addEventListener('click', () => {
-        if (!playerIsSpectator) {
-            socket.emit('restartgame');
-        }
-    });
+    // Если ход невалидный, возвращаем фигуру назад
+    if (move === null) {
+        return 'snapback';
+    }
 
-    // --- Конфигурация и создание доски ---
+    // Если ход валидный, отправляем его на сервер
+    socket.emit('move', { move: move, fen: game.fen(), pgn: game.pgn() });
+};
 
-    const config = {
-        draggable: true,
-        position: 'start',
-        orientation: 'white', // ИСПРАВЛЕНО: По умолчанию всегда белые внизу
-        onDragStart: onDragStart,
-        onDrop: onDrop,
-        onSnapEnd: onSnapEnd,
-        pieceTheme: 'img/chesspieces/wikipedia/{piece}.png'
-    };
-    board = Chessboard('myBoard', config);
+const onMoveEnd = function() {
+    updatePgnData(game.pgn());
+    checkGameOver(); // Проверяем состояние игры после каждого хода
+};
 
-    statusEl.textContent = 'Подключение к серверу...';
+// ==============================================================
+// Инициализация chessboard.js
+// ==============================================================
+
+const boardConfig = {
+    draggable: true,
+    position: 'start',
+    onDragStart: onDragStart,
+    onDrop: onDrop,
+    onMoveEnd: onMoveEnd
+};
+
+function setupBoard() {
+    board = Chessboard('board', boardConfig);
+    // При загрузке страницы показываем только кнопки присоединения
+    gameControls.hide();
+    joinControls.show();
+}
+
+// ==============================================================
+// Вспомогательные функции
+// ==============================================================
+
+function updatePgnData(pgn) {
+    pgnEl.text(pgn);
+}
+
+function checkGameOver() {
+    if (game.in_checkmate()) {
+        const winner = game.turn() === 'w' ? 'Черные' : 'Белые';
+        statusEl.text(`Шах и мат! ${winner} победили!`);
+        gameIsOver = true;
+        socket.emit('gameover', { message: `Шах и мат! ${winner} победили!` });
+    } else if (game.in_stalemate()) {
+        statusEl.text('Пат!');
+        gameIsOver = true;
+        socket.emit('gameover', { message: 'Пат!' });
+    } else if (game.in_draw()) {
+        statusEl.text('Ничья!');
+        gameIsOver = true;
+        socket.emit('gameover', { message: 'Ничья!' });
+    } else if (game.in_threefold_repetition()) {
+        statusEl.text('Ничья (тройное повторение)!');
+        gameIsOver = true;
+        socket.emit('gameover', { message: 'Ничья (тройное повторение)!' });
+    } else if (game.insufficient_material()) {
+        statusEl.text('Ничья (недостаточно фигур для мата)!');
+        gameIsOver = true;
+        socket.emit('gameover', { message: 'Ничья (недостаточно фигур для мата)!' });
+    }
+}
+
+// ==============================================================
+// Инициализация приложения
+// ==============================================================
+
+$(document).ready(function() {
+    setupBoard();
 });
